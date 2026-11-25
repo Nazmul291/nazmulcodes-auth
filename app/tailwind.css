@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+  html,
+  body {
+    @apply bg-neutral-950 font-sans text-neutral-100 antialiased;
+  }
+  ::selection {
+    @apply bg-neutral-100 text-neutral-950;
+  }
+}
+
+@layer components {
+  /* Skeleton shimmer */
+  .loading {
+    @apply relative overflow-hidden bg-neutral-800/60;
+  }
+  .loading::after {
+    content: "";
+    @apply absolute inset-0 -translate-x-full;
+    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.06), transparent);
+    animation: nc-shimmer 1.4s infinite;
+  }
+}
+
+@keyframes nc-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading::after {
+    animation: none;
+  }
+}

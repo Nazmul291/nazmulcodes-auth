@@ -1,0 +1,139 @@
+// NazmulCodes Auth — central Identity Provider schema.
+// NOTE: The Root Super Admin is intentionally NOT stored here (it lives in .env)
+// so the platform can always be recovered even if this database is wiped.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum ClientAppStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum AuditActorType {
+  SUPER_ADMIN
+  USER
+  CLIENT_APP
+  SYSTEM
+  ANONYMOUS
+}
+
+model CentralUser {
+  id            String     @id @default(cuid())
+  /// Always stored lower-cased + trimmed.
+  email         String     @unique
+  emailVerified Boolean    @default(false)
+  name          String?
+  avatarUrl     String?
+  /// bcrypt hash. Null for Google-only accounts.
+  passwordHash  String?
+  googleId      String?    @unique
+  status        UserStatus @default(ACTIVE)
+
+  twoFactorEnabled       Boolean @default(false)
+  /// AES-256-GCM ciphertext (MASTER_ENCRYPTION_KEY). Never stored in plaintext.
+  twoFactorSecret        String?
+  /// Encrypted secret awaiting confirmation during the setup wizard.
+  twoFactorPendingSecret String?
+  /// Last accepted TOTP time-step — prevents replay of the same 6-digit code.
+  twoFactorLastUsedStep  Int?
+
+  /// Bump to invalidate every stateless session cookie issued for this user.
+  sessionVersion Int       @default(1)
+  lastLoginAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  backupCodes        BackupCode[]
+  appConnections     AppConnection[]
+  authorizationCodes AuthorizationCode[]
+
+  @@index([status])
+}
+
+model BackupCode {
+  id        String      @id @default(cuid())
+  userId    String
+  /// SHA-256 hex of the normalised code. Plaintext is shown exactly once.
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime    @default(now())
+  user      CentralUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, codeHash])
+}
+
+model ClientApplication {
+  id              String          @id @default(cuid())
+  /// Public identifier used as `client_id` (e.g. "veltrix").
+  slug            String          @unique
+  name            String
+  description     String?
+  status          ClientAppStatus @default(ACTIVE)
+  allowedOrigins  String[]        @default([])
+  callbackUrls    String[]        @default([])
+  /// SHA-256 hex of the full `nc_live_…` key. The key itself is never stored.
+  apiKeyHash      String          @unique
+  /// Display-only prefix, e.g. "nc_live_9a4f".
+  apiKeyPrefix    String
+  apiKeyRotatedAt DateTime        @default(now())
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  connections        AppConnection[]
+  authorizationCodes AuthorizationCode[]
+}
+
+model AuthorizationCode {
+  id          String            @id @default(cuid())
+  /// SHA-256 hex of the code. The plaintext only ever lives in the redirect URL.
+  codeHash    String            @unique
+  clientAppId String
+  userId      String
+  redirectUri String
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime          @default(now())
+  clientApp   ClientApplication @relation(fields: [clientAppId], references: [id], onDelete: Cascade)
+  user        CentralUser       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+}
+
+model AppConnection {
+  id               String            @id @default(cuid())
+  userId           String
+  clientAppId      String
+  firstConnectedAt DateTime          @default(now())
+  lastUsedAt       DateTime          @default(now())
+  user             CentralUser       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientApp        ClientApplication @relation(fields: [clientAppId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, clientAppId])
+}
+
+model AuditLog {
+  id        String         @id @default(cuid())
+  actorType AuditActorType
+  actorId   String?
+  action    String
+  success   Boolean        @default(true)
+  ip        String?
+  userAgent String?
+  metadata  Json?
+  createdAt DateTime       @default(now())
+
+  @@index([action, createdAt])
+  @@index([actorType, actorId])
+}

@@ -1,0 +1,22 @@
+# Local development database for NazmulCodes Auth.
+# Start: docker compose up -d   ·   DATABASE_URL uses port 55433.
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: nazmulcodes-auth-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: nc_auth
+      POSTGRES_PASSWORD: nc_auth_dev
+      POSTGRES_DB: nazmulcodes_auth
+    ports:
+      - "127.0.0.1:55433:5432"
+    volumes:
+      - nc_auth_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nc_auth -d nazmulcodes_auth"]
+      interval: 2s
+      retries: 30
+
+volumes:
+  nc_auth_pgdata:
