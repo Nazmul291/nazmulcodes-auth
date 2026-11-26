@@ -14,7 +14,12 @@ import { Toaster } from "~/components/ui";
 import { useToasts } from "~/hooks/useToasts";
 import stylesheet from "~/tailwind.css?url";
 
-export const links: LinksFunction = () => [{ rel: "stylesheet", href: stylesheet }];
+export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: stylesheet },
+  { rel: "icon", href: "/favicon.ico", sizes: "48x48" },
+  { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
+  { rel: "apple-touch-icon", href: "/apple-touch-icon.png" },
+];
 
 export const meta: MetaFunction = () => [
   { title: "NazmulCodes Auth" },
