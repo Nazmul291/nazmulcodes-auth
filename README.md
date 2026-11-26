@@ -8,12 +8,12 @@ Remix (Vite, strict TS) · Prisma/PostgreSQL · Zustand · Tailwind · otplib.
 ```bash
 npm install
 cp .env.example .env
-npm run secrets -- "<a long root password>" you@nazmulcodes.org   # paste output into .env
+npm run setup:admin -- --with-encryption-key   # paste output into .env
 npm run db:push        # or: npm run db:migrate
 npm run dev            # http://localhost:5173
 ```
 
-To set up or change only the root admin login (email, password, authenticator), run:
+To change only the root admin login later (email, password, authenticator), run:
 
 ```bash
 npm run setup:admin               # hidden password prompt, terminal QR code, verifies your authenticator

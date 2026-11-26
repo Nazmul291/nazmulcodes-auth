@@ -4,6 +4,7 @@
  * environment variables (.env locally, the hosting dashboard in production):
  *   SUPER_ADMIN_PASSWORD_HASH  (bcrypt, cost 12)
  *   SUPER_ADMIN_TOTP_SECRET    (Base32, 160-bit)
+ *   MASTER_ENCRYPTION_KEY      (only with --with-encryption-key, for a new install)
  *
  * Nothing is written to disk. The password is typed hidden (or generated with
  * --generate), the TOTP QR code is drawn in the terminal, and you can confirm
@@ -13,6 +14,7 @@
  *   npm run setup:admin
  *   npm run setup:admin -- --email owner@nazmulcodes.org
  *   npm run setup:admin -- --generate          # random password, shown once
+ *   npm run setup:admin -- --with-encryption-key   # first-time setup: also prints MASTER_ENCRYPTION_KEY
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -35,7 +37,7 @@ const option = (name) => {
   return i >= 0 ? args[i + 1] : undefined;
 };
 if (flag("--help") || flag("-h")) {
-  console.log("Usage: npm run setup:admin -- [--email you@example.com] [--generate]");
+  console.log("Usage: npm run setup:admin -- [--email you@example.com] [--generate] [--with-encryption-key]");
   process.exit(0);
 }
 
@@ -146,14 +148,18 @@ async function main() {
   }
   if (!verified) console.log("  ! Authenticator not verified — make sure it works before deploying.");
 
+  const masterKey = flag("--with-encryption-key") ? randomBytes(32).toString("hex") : null;
+
   // Output
   const bar = "─".repeat(72);
   console.log(`\n${bar}`);
   console.log("Local .env  (keep the hash in SINGLE quotes):\n");
+  if (masterKey) console.log(`MASTER_ENCRYPTION_KEY="${masterKey}"`);
   console.log(`SUPER_ADMIN_EMAIL="${email}"`);
   console.log(`SUPER_ADMIN_PASSWORD_HASH='${hash}'`);
   console.log(`SUPER_ADMIN_TOTP_SECRET="${secret}"`);
   console.log("\nProduction (Docker / Fly / Vercel / Railway dashboard) — paste the raw values, no quotes:\n");
+  if (masterKey) console.log(`MASTER_ENCRYPTION_KEY    ${masterKey}`);
   console.log(`SUPER_ADMIN_EMAIL        ${email}`);
   console.log(`SUPER_ADMIN_PASSWORD_HASH ${hash}`);
   console.log(`SUPER_ADMIN_TOTP_SECRET  ${secret}`);
@@ -161,6 +167,10 @@ async function main() {
     console.log(`\nGenerated root password (shown ONCE — save it in your password manager):\n\n  ${password}`);
   }
   console.log(`${bar}`);
+  if (masterKey) {
+    console.log("MASTER_ENCRYPTION_KEY is for a NEW install. Replacing an existing one signs out every user");
+    console.log("and makes stored 2FA secrets unreadable.");
+  }
   console.log("Changing these values signs out every existing root admin session. Restart the server after updating.");
   console.log("Clear your terminal scrollback when done (e.g. `clear && printf '\\e[3J'`).\n");
 }

@@ -12,7 +12,6 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:generate": "prisma generate",
-    "secrets": "node scripts/generate-secrets.mjs",
     "setup:admin": "node scripts/setup-admin.mjs",
     "postinstall": "prisma generate"
   },
