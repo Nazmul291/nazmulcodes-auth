@@ -8,19 +8,28 @@ Remix (Vite, strict TS) · Prisma/PostgreSQL · Zustand · Tailwind · otplib.
 ```bash
 npm install
 cp .env.example .env
-npm run setup:admin -- --with-encryption-key   # paste output into .env
+npm run setup:admin:dev -- --with-encryption-key   # answer y to write the values into .env
 npm run db:push        # or: npm run db:migrate
 npm run dev            # http://localhost:5173
 ```
 
-To change only the root admin login later (email, password, authenticator), run:
+### Root admin credentials: development vs production
 
-```bash
-npm run setup:admin               # hidden password prompt, terminal QR code, verifies your authenticator
-npm run setup:admin -- --generate # random password, shown once
-```
+`npm run setup:admin` asks which environment the credentials are for, so dev and production never share a login:
 
-It writes nothing to disk. It prints values for `.env` and raw values for your hosting dashboard in production.
+| Command | Output |
+|---|---|
+| `npm run setup:admin:dev` | `.env` lines (hash in single quotes). Can write them into `.env` for you. Authenticator label: "NazmulCodes Root (dev)". |
+| `npm run setup:admin:prod` | Raw values for Vercel → Settings → Environment Variables. Writes no files. Authenticator label: "NazmulCodes Root". |
+
+It asks whether to generate a random password (default yes). A generated password is shown once, so you can copy it into your password manager. Options, passed after `--`:
+
+- `--generate`: random password, no question asked
+- `--type-password`: type your own password (hidden)
+- `--email you@example.com`: root admin email
+- `--with-encryption-key`: also create `MASTER_ENCRYPTION_KEY` (new installs only)
+
+Example: `npm run setup:admin:prod -- --generate --with-encryption-key`
 
 Google Cloud console → OAuth client → authorized redirect URI: `${APP_BASE_URL}/auth/google/callback`.
 
