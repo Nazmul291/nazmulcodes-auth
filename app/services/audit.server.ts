@@ -44,7 +44,8 @@ async function writeAudit(entry: AuditEntry): Promise<void> {
   try {
     await Promise.race([
       db.auditLog.create({ data }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error("audit timeout")), 2000)),
+      // Generous: callers do not wait for this, and on Vercel waitUntil keeps it alive.
+      new Promise((_, reject) => setTimeout(() => reject(new Error("audit timeout")), 8000)),
     ]);
   } catch (err) {
     console.warn("[audit] database unavailable, logging to stderr:", JSON.stringify(data), String(err));

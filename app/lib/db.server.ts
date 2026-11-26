@@ -47,15 +47,24 @@ export const db: PrismaClient =
 
 if (!isProduction) globalForPrisma.__ncPrisma = db;
 
-/** True when PostgreSQL answers within `timeoutMs`. Never throws. */
-export async function isDatabaseReachable(timeoutMs = 1500): Promise<boolean> {
+/**
+ * True when PostgreSQL answers within `timeoutMs`. Never throws.
+ * The first query on a cold serverless instance has to open a new TLS
+ * connection, which can take a few seconds when the function and the database
+ * are in different regions, so the default allows 5s. The reason for a failure
+ * is logged so it shows up in the Vercel logs.
+ */
+export async function isDatabaseReachable(timeoutMs = 5000): Promise<boolean> {
+  const started = Date.now();
   try {
     await Promise.race([
       db.$queryRaw`SELECT 1`,
-      new Promise((_, reject) => setTimeout(() => reject(new Error("db timeout")), timeoutMs)),
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`no answer within ${timeoutMs}ms`)), timeoutMs)),
     ]);
     return true;
-  } catch {
+  } catch (err) {
+    const reason = err instanceof Error ? err.message.trim().split("\n").filter(Boolean).slice(-2).join(" ") : String(err);
+    console.error(`[db] unreachable after ${Date.now() - started}ms: ${reason}`);
     return false;
   }
 }
