@@ -57,6 +57,17 @@ export default function RegisterRoute() {
         <GoogleButton returnTo={returnTo} label="Sign up with Google" />
         <Divider />
         <RegisterForm error={error} fieldErrors={fieldErrors} submitting={isSubmitting} onSubmit={register} />
+        <p className="text-center text-xs leading-relaxed text-neutral-500">
+          By creating an account, you agree to our{" "}
+          <Link to="/terms" className="text-neutral-300 underline-offset-4 hover:underline">
+            Terms of Service
+          </Link>{" "}
+          and{" "}
+          <Link to="/privacy" className="text-neutral-300 underline-offset-4 hover:underline">
+            Privacy Policy
+          </Link>
+          .
+        </p>
       </div>
     </AuthLayout>
   );

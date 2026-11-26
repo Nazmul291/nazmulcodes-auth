@@ -1,5 +1,6 @@
 import { Link } from "@remix-run/react";
 import type { ReactNode } from "react";
+import { LegalFooterLinks } from "./LegalLayout";
 import { Logo } from "./Logo";
 
 /** Authenticated page chrome: top bar + optional nav + content column. */
@@ -28,6 +29,9 @@ export function AppShell({
         ) : null}
       </header>
       <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6 sm:py-12">{children}</main>
+      <footer className="mx-auto w-full max-w-5xl px-4 pb-10 sm:px-6">
+        <LegalFooterLinks className="justify-start" />
+      </footer>
     </div>
   );
 }
@@ -52,6 +56,7 @@ export function AuthLayout({ title, subtitle, children, footer, logoSuffix }: {
         </div>
         <div className="rounded-xl border border-neutral-800/80 bg-neutral-900/40 p-5 sm:p-6">{children}</div>
         {footer ? <div className="text-center text-sm text-neutral-500">{footer}</div> : null}
+        <LegalFooterLinks />
       </div>
     </div>
   );
