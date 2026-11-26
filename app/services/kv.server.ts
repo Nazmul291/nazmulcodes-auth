@@ -2,12 +2,16 @@ import { Redis } from "@upstash/redis";
 import { env } from "~/lib/env.server";
 
 /**
- * Small key-value store shared by every server instance.
+ * Small key-value store for the root lockout, the root TOTP replay guard and
+ * user rate limits.
  *
  * - Upstash Redis (REST) when UPSTASH_REDIS_REST_URL / _TOKEN (or Vercel's
- *   KV_REST_API_URL / _TOKEN) are set. Required on Vercel, where many
- *   short-lived instances run at once and memory is not shared.
- * - In-process memory otherwise (local development, single long-running server).
+ *   KV_REST_API_URL / _TOKEN) are set: shared by every server instance.
+ * - Otherwise, in-process memory (the fallback). Fine for local development and
+ *   a single long-running server. On Vercel it still works, but each serverless
+ *   instance keeps its own counts and loses them on a cold start, so the
+ *   10-attempt root lockout and the rate limits are much weaker. Add Upstash
+ *   for full protection.
  *
  * Used for the root lockout, the root TOTP replay guard and user rate limits.
  * Deliberately independent of PostgreSQL.
@@ -126,7 +130,17 @@ class MemoryStore implements KvStore {
 
 const g = globalThis as unknown as { __ncKv?: KvStore };
 
-export const kv: KvStore = (g.__ncKv ??=
-  env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN
-    ? new UpstashStore(env.UPSTASH_REDIS_REST_URL, env.UPSTASH_REDIS_REST_TOKEN)
-    : new MemoryStore());
+function createStore(): KvStore {
+  if (env.UPSTASH_REDIS_REST_URL && env.UPSTASH_REDIS_REST_TOKEN) {
+    return new UpstashStore(env.UPSTASH_REDIS_REST_URL, env.UPSTASH_REDIS_REST_TOKEN);
+  }
+  if (env.VERCEL) {
+    console.warn(
+      "[kv] Upstash Redis is not configured; using in-memory fallback. On Vercel each instance " +
+        "counts separately, so the root lockout and rate limits are weaker. Add Upstash for Redis to fix this.",
+    );
+  }
+  return new MemoryStore();
+}
+
+export const kv: KvStore = (g.__ncKv ??= createStore());

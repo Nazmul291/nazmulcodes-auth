@@ -41,7 +41,7 @@ Keep `SUPER_ADMIN_PASSWORD_HASH` in **single quotes** in `.env`. Vite's dotenv e
 1. **Database:** add **Prisma Postgres** from Vercel → Storage (Marketplace) and connect it to the project.
    - Set both `DATABASE_URL` and `DIRECT_URL` to the **direct `postgres://…` connection string** from the Prisma Postgres dashboard (it has built-in connection pooling). Migrations need the direct URL.
    - The `prisma+postgres://` (Accelerate) URL also passes validation, but use it only after testing it with this Prisma version.
-2. **Shared store:** add **Upstash for Redis** from the Marketplace and connect it. Its `KV_REST_API_URL` / `KV_REST_API_TOKEN` are picked up automatically. The app refuses to start on Vercel without it.
+2. **Shared store (optional, recommended):** add **Upstash for Redis** from the Marketplace and connect it. Its `KV_REST_API_URL` / `KV_REST_API_TOKEN` are picked up automatically. Without it the app falls back to memory and logs a warning. That works, but each serverless instance then counts separately and forgets on a cold start, so the 10-attempt root lockout and the rate limits become much weaker.
 3. **Other variables** (Production, mark as Sensitive): `MASTER_ENCRYPTION_KEY`, `SUPER_ADMIN_EMAIL`, `SUPER_ADMIN_PASSWORD_HASH`, `SUPER_ADMIN_TOTP_SECRET` (from `npm run setup:admin:prod -- --with-encryption-key`), `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `APP_BASE_URL=https://auth.nazmulcodes.org`.
 4. **Domain:** add `auth.nazmulcodes.org` under Settings → Domains.
 5. **Deploy.** Vercel runs `npm run vercel-build`, which applies migrations (`prisma migrate deploy`) and then builds with the Vercel preset. Give Preview deployments their own database, or they will migrate production.
@@ -93,7 +93,7 @@ const { valid } = await auth.verifyUserStatus(user.id);
 
 ## Security notes
 
-- **Root lockout** is global (not per-IP) by design. Anyone who can reach `/root-access` can trigger it, and that locks out the owner until a restart. The counter lives in the shared KV store, never in Postgres: in memory locally (restart `npm run dev` to unlock), in Upstash Redis on Vercel, scoped to the deployment (redeploy to unlock, or delete the `nc-auth:root:*` keys in the Upstash console). If the store is unreachable, root login fails closed (503).
+- **Root lockout** is global (not per-IP) by design. Anyone who can reach `/root-access` can trigger it, and that locks out the owner until a restart. The counter lives in the shared KV store, never in Postgres: in Upstash Redis when it is configured, scoped to the deployment (redeploy to unlock, or delete the `nc-auth:root:*` keys in the Upstash console), otherwise in memory (restart to unlock; on Vercel this is per instance, so add Upstash for a real lockout). If Upstash is configured but unreachable, root login fails closed (503).
 - Everything sealed with `MASTER_ENCRYPTION_KEY` uses HKDF subkeys bound to a purpose, with AES-256-GCM. Rotating the key logs everyone out and makes stored 2FA secrets unreadable.
 - Authorization codes are 256-bit, live for 60 seconds, are stored as SHA-256 hashes, are consumed atomically, and are bound to their client and `redirect_uri`.
 - TOTP is checked in constant time across a ±1-step window, and a code's time-step can only be used once (replay guard).

@@ -29,7 +29,7 @@ const EnvSchema = z.object({
     .string()
     .url()
     .transform((v) => v.replace(/\/+$/, "")),
-  // Shared store for the root lockout and rate limits. Required on Vercel.
+  // Optional shared store for the root lockout and rate limits. Without it, memory is used.
   // Vercel's Upstash integration names them KV_REST_API_URL / KV_REST_API_TOKEN; both are accepted.
   UPSTASH_REDIS_REST_URL: z.string().url().optional(),
   UPSTASH_REDIS_REST_TOKEN: z.string().min(1).optional(),
@@ -37,13 +37,6 @@ const EnvSchema = z.object({
 }).superRefine((v, ctx) => {
   if (Boolean(v.UPSTASH_REDIS_REST_URL) !== Boolean(v.UPSTASH_REDIS_REST_TOKEN)) {
     ctx.addIssue({ code: "custom", path: ["UPSTASH_REDIS_REST_TOKEN"], message: "Set both UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN, or neither" });
-  }
-  if (v.VERCEL && !v.UPSTASH_REDIS_REST_URL) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["UPSTASH_REDIS_REST_URL"],
-      message: "Required on Vercel: in-memory lockout and rate limits do not work across serverless instances. Add Upstash Redis from the Vercel Marketplace",
-    });
   }
 });
 

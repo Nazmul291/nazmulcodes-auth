@@ -26,6 +26,7 @@ import { verifyTotp } from "./totp.server";
 export const MAX_ROOT_ATTEMPTS = 10;
 const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 8; // 8h
 /** Keeps old deployments' keys from piling up; far longer than any deployment lives. */
+// Note: without Upstash on Vercel, the memory fallback is per instance (see kv.server.ts).
 const ROOT_KEY_TTL_SECONDS = 60 * 60 * 24 * 90;
 
 const scope = process.env.VERCEL_DEPLOYMENT_ID ?? process.env.VERCEL_GIT_COMMIT_SHA ?? "local";
