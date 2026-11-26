@@ -9,7 +9,8 @@ Remix (Vite, strict TS) · Prisma/PostgreSQL · Zustand · Tailwind · otplib.
 npm install
 cp .env.example .env
 npm run setup:admin:dev -- --with-encryption-key   # answer y to write the values into .env
-npm run db:push        # or: npm run db:migrate
+docker compose up -d   # local Postgres on port 55433
+npm run db:deploy      # apply migrations
 npm run dev            # http://localhost:5173
 ```
 
@@ -34,6 +35,18 @@ Example: `npm run setup:admin:prod -- --generate --with-encryption-key`
 Google Cloud console → OAuth client → authorized redirect URI: `${APP_BASE_URL}/auth/google/callback`.
 
 Keep `SUPER_ADMIN_PASSWORD_HASH` in **single quotes** in `.env`. Vite's dotenv expansion corrupts `$2b$…` values. The env loader detects this and re-reads the raw `.env` file, but platform env vars (Docker/Fly/Vercel) must be set verbatim.
+
+## Deploying to Vercel
+
+1. **Database:** add **Prisma Postgres** from Vercel → Storage (Marketplace) and connect it to the project.
+   - Set both `DATABASE_URL` and `DIRECT_URL` to the **direct `postgres://…` connection string** from the Prisma Postgres dashboard (it has built-in connection pooling). Migrations need the direct URL.
+   - The `prisma+postgres://` (Accelerate) URL also passes validation, but use it only after testing it with this Prisma version.
+2. **Shared store:** add **Upstash for Redis** from the Marketplace and connect it. Its `KV_REST_API_URL` / `KV_REST_API_TOKEN` are picked up automatically. The app refuses to start on Vercel without it.
+3. **Other variables** (Production, mark as Sensitive): `MASTER_ENCRYPTION_KEY`, `SUPER_ADMIN_EMAIL`, `SUPER_ADMIN_PASSWORD_HASH`, `SUPER_ADMIN_TOTP_SECRET` (from `npm run setup:admin:prod -- --with-encryption-key`), `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `APP_BASE_URL=https://auth.nazmulcodes.org`.
+4. **Domain:** add `auth.nazmulcodes.org` under Settings → Domains.
+5. **Deploy.** Vercel runs `npm run vercel-build`, which applies migrations (`prisma migrate deploy`) and then builds with the Vercel preset. Give Preview deployments their own database, or they will migrate production.
+
+Keep "Automatically expose System Environment Variables" on (the default): the root lockout uses `VERCEL_DEPLOYMENT_ID` to reset on each deploy.
 
 ## Routes
 
@@ -80,10 +93,10 @@ const { valid } = await auth.verifyUserStatus(user.id);
 
 ## Security notes
 
-- **Root lockout** is global (not per-IP) by design. Anyone who can reach `/root-access` can trigger it, and that locks out the owner until a restart. To make the lock survive restarts, set `LOCKOUT_PERSISTENCE = "file"` in `app/services/super-admin.server.ts` (writes `.data/root-lockout.json`). The counter is per-process: run a single instance or move it to a shared store.
+- **Root lockout** is global (not per-IP) by design. Anyone who can reach `/root-access` can trigger it, and that locks out the owner until a restart. The counter lives in the shared KV store, never in Postgres: in memory locally (restart `npm run dev` to unlock), in Upstash Redis on Vercel, scoped to the deployment (redeploy to unlock, or delete the `nc-auth:root:*` keys in the Upstash console). If the store is unreachable, root login fails closed (503).
 - Everything sealed with `MASTER_ENCRYPTION_KEY` uses HKDF subkeys bound to a purpose, with AES-256-GCM. Rotating the key logs everyone out and makes stored 2FA secrets unreadable.
 - Authorization codes are 256-bit, live for 60 seconds, are stored as SHA-256 hashes, are consumed atomically, and are bound to their client and `redirect_uri`.
 - TOTP is checked in constant time across a ±1-step window, and a code's time-step can only be used once (replay guard).
 - Password sign-ups are `emailVerified=false` because no email delivery is wired up. If the same email later signs in with Google, the unverified password and any 2FA on that account are wiped (protection against pre-account-takeover).
 - `verify-user` returns `valid: true` only for users who are still connected to the calling app. Users can disconnect apps in `/account/security`.
-- The user rate limiter is in memory. Swap it for Redis/KV if you run multiple instances.
+- User rate limits use the same KV store. If it is unreachable they fail open (logged), so users can still sign in.

@@ -41,7 +41,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const { pending, user } = ctx;
 
   // Per-user limit so a stolen first factor can't brute-force 10^6 codes.
-  const limit = rateLimit(`2fa:${user.id}`, MAX_2FA_ATTEMPTS, 15 * 60);
+  const limit = await rateLimit(`2fa:${user.id}`, MAX_2FA_ATTEMPTS, 15 * 60);
   if (!limit.ok) {
     void audit({ actorType: "USER", actorId: user.id, action: "user.login.2fa.rate_limited", success: false, request });
     return redirectDocument("/login?error=expired", withCookies([destroyPending2fa()]));
@@ -59,7 +59,7 @@ export async function action({ request }: ActionFunctionArgs) {
     );
   }
 
-  resetRateLimit(`2fa:${user.id}`);
+  await resetRateLimit(`2fa:${user.id}`);
   await db.centralUser.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
   void audit({ actorType: "USER", actorId: user.id, action: `user.login.2fa.success.${result.method}`, request, metadata: { firstFactor: pending.method } });
   return redirectDocument(pending.returnTo, withCookies([commitUserSession(user, true), destroyPending2fa()]));

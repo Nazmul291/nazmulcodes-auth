@@ -64,7 +64,7 @@ export async function action({ request }: ActionFunctionArgs) {
   const intent = String(form.get("intent")) as TwoFactorIntent;
 
   const guarded = intent === "confirm-setup" || intent === "disable" || intent === "regenerate-backup-codes";
-  if (guarded && !rateLimit(`2fa-manage:${user.id}`, 8, 15 * 60).ok) {
+  if (guarded && !(await rateLimit(`2fa-manage:${user.id}`, 8, 15 * 60)).ok) {
     return fail(intent, "Too many attempts. Try again in a few minutes.", 429);
   }
 

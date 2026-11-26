@@ -42,8 +42,10 @@ export async function action({ request }: ActionFunctionArgs) {
   const returnTo = safeReturnTo(parsed.data.returnTo);
 
   const ip = getClientIp(request) ?? "unknown";
-  const byIp = rateLimit(`login:ip:${ip}`, 30, 15 * 60);
-  const byEmail = rateLimit(`login:email:${email}`, 10, 15 * 60);
+  const [byIp, byEmail] = await Promise.all([
+    rateLimit(`login:ip:${ip}`, 30, 15 * 60),
+    rateLimit(`login:email:${email}`, 10, 15 * 60),
+  ]);
   if (!byIp.ok || !byEmail.ok) {
     const minutes = Math.ceil(Math.max(byIp.retryAfterSeconds, byEmail.retryAfterSeconds) / 60);
     return json<UserAuthActionData>({ ok: false, error: `Too many attempts. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.` }, { status: 429 });
@@ -58,7 +60,7 @@ export async function action({ request }: ActionFunctionArgs) {
     return json<UserAuthActionData>({ ok: false, error: ERRORS.suspended! }, { status: 403 });
   }
 
-  resetRateLimit(`login:email:${email}`);
+  await resetRateLimit(`login:email:${email}`);
   void audit({ actorType: "USER", actorId: user.id, action: "user.login.password.first_factor", request });
   const { location, cookies } = await completeFirstFactor(user, returnTo, "password");
   // Full document redirect so a follow-up /authorize can redirect off-site cleanly.

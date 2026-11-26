@@ -1,102 +1,57 @@
-import fs from "node:fs";
-import path from "node:path";
 import { redirect } from "@remix-run/node";
 import bcrypt from "bcryptjs";
 import { env } from "~/lib/env.server";
 import { audit } from "./audit.server";
 import { createSealedCookie } from "./cookie.server";
 import { safeEqual, sha256Hex } from "./crypto.server";
+import { kv } from "./kv.server";
 import { verifyTotp } from "./totp.server";
 
 /**
  * Root Super Admin — 100% database-independent.
  *
- * Credentials live only in .env (email, bcrypt hash, TOTP secret) so the owner
- * can always reach /admin/* to recover the platform, even with an empty or
- * unreachable PostgreSQL.
+ * Credentials live only in environment variables (email, bcrypt hash, TOTP
+ * secret), so the owner can always reach /admin/* to recover the platform,
+ * even with an empty or unreachable PostgreSQL.
  *
  * Lockout policy: a STRICT maximum of 10 failed attempts (global, not per-IP).
- * The 10th failure permanently locks /root-access (HTTP 423) until the server
- * process is restarted. Successful login resets the counter.
+ * The 10th failure locks /root-access (HTTP 423) until the server restarts.
+ *
+ * The counter lives in the shared KV store (kv.server.ts), never in Postgres:
+ * - Locally without Upstash it is in memory, so restarting `npm run dev` unlocks.
+ * - On Vercel it is in Upstash Redis, shared by every instance. Keys are scoped
+ *   to the deployment, so a redeploy is the "restart" that unlocks. You can
+ *   also delete the `nc-auth:root:*` keys in the Upstash console.
  */
 export const MAX_ROOT_ATTEMPTS = 10;
 const ADMIN_SESSION_TTL_SECONDS = 60 * 60 * 8; // 8h
+/** Keeps old deployments' keys from piling up; far longer than any deployment lives. */
+const ROOT_KEY_TTL_SECONDS = 60 * 60 * 24 * 90;
 
-// ─── Lockout store ───────────────────────────────────────────────────────────
+const scope = process.env.VERCEL_DEPLOYMENT_ID ?? process.env.VERCEL_GIT_COMMIT_SHA ?? "local";
+const K_FAILURES = `root:${scope}:failures`;
+const K_LOCKED = `root:${scope}:locked-at`;
+const K_LAST_TOTP_STEP = `root:${scope}:totp-last-step`;
+const totpStepKey = (step: number) => `root:${scope}:totp-step:${step}`;
 
-export interface LockoutState {
-  failures: number;
+export interface LockoutStatus {
   locked: boolean;
   lockedAt: string | null;
+  remaining: number;
 }
 
-interface LockoutStore {
-  read(): LockoutState;
-  write(state: LockoutState): void;
-}
-
-const EMPTY: LockoutState = { failures: 0, locked: false, lockedAt: null };
-
-/** Default: survives HMR/module reloads, cleared by a process restart. */
-class MemoryLockoutStore implements LockoutStore {
-  private state: LockoutState = { ...EMPTY };
-  read() {
-    return { ...this.state };
-  }
-  write(state: LockoutState) {
-    this.state = { ...state };
-  }
-}
-
-/**
- * Optional: persists to `.data/root-lockout.json` so the lock also survives
- * restarts/redeploys. Unlock by deleting that file and restarting.
- * Memory remains authoritative if the filesystem is read-only.
- */
-class FileLockoutStore implements LockoutStore {
-  private memory = new MemoryLockoutStore();
-  private file = path.resolve(process.cwd(), ".data/root-lockout.json");
-  constructor() {
-    try {
-      const parsed = JSON.parse(fs.readFileSync(this.file, "utf8")) as LockoutState;
-      this.memory.write({ ...EMPTY, ...parsed });
-    } catch {
-      /* no file yet */
-    }
-  }
-  read() {
-    return this.memory.read();
-  }
-  write(state: LockoutState) {
-    this.memory.write(state);
-    try {
-      fs.mkdirSync(path.dirname(this.file), { recursive: true });
-      fs.writeFileSync(this.file, JSON.stringify(state), { mode: 0o600 });
-    } catch (err) {
-      console.error("[root-access] could not persist lockout file:", err);
-    }
-  }
-}
-
-/** Switch to "file" to make the lockout survive restarts. */
-const LOCKOUT_PERSISTENCE = "memory" as "memory" | "file";
-
-interface RootGlobals {
-  __ncRootLockout?: LockoutStore;
-  __ncRootInFlight?: number;
-  __ncRootLastTotpStep?: number;
-}
-const g = globalThis as unknown as RootGlobals;
-const store: LockoutStore = (g.__ncRootLockout ??=
-  LOCKOUT_PERSISTENCE === "file" ? new FileLockoutStore() : new MemoryLockoutStore());
-
-export function getLockoutStatus() {
-  const state = store.read();
+/** Throws if the KV store is unreachable — callers treat that as "unavailable". */
+export async function getLockoutStatus(): Promise<LockoutStatus> {
+  const [lockedAt, failures] = await Promise.all([kv.get(K_LOCKED), kv.get(K_FAILURES)]);
   return {
-    locked: state.locked,
-    lockedAt: state.lockedAt,
-    remaining: Math.max(0, MAX_ROOT_ATTEMPTS - state.failures),
+    locked: lockedAt !== null,
+    lockedAt,
+    remaining: Math.max(0, MAX_ROOT_ATTEMPTS - Number(failures ?? 0)),
   };
+}
+
+async function lock() {
+  await kv.set(K_LOCKED, new Date().toISOString(), { ttlSeconds: ROOT_KEY_TTL_SECONDS });
 }
 
 // ─── Stateless admin session ─────────────────────────────────────────────────
@@ -146,74 +101,90 @@ export type RootLoginResult =
   | { status: "ok"; setCookie: string }
   | { status: "invalid"; remaining: number; message: string }
   | { status: "locked"; message: string }
-  | { status: "busy"; message: string };
+  | { status: "unavailable"; message: string };
 
 const LOCKED_MESSAGE =
-  "Root access is permanently locked after 10 failed attempts. Restart the server to unlock.";
+  "Root access is permanently locked after 10 failed attempts. Restart (redeploy) the server to unlock.";
+const UNAVAILABLE_MESSAGE = "Root access is temporarily unavailable. Please try again shortly.";
 
 export async function authenticateRootAdmin(
   request: Request,
   input: { email: string; password: string; totp: string },
 ): Promise<RootLoginResult> {
-  const before = store.read();
-  if (before.locked) {
+  try {
+    return await attempt(request, input);
+  } catch (err) {
+    // Fail closed: if the lockout store cannot be reached, nobody gets in.
+    console.error("[root-access] lockout store unavailable:", err);
+    void audit({ actorType: "ANONYMOUS", action: "root.login.store_unavailable", success: false, request });
+    return { status: "unavailable", message: UNAVAILABLE_MESSAGE };
+  }
+}
+
+async function attempt(
+  request: Request,
+  input: { email: string; password: string; totp: string },
+): Promise<RootLoginResult> {
+  if (await kv.get(K_LOCKED)) {
     void audit({ actorType: "ANONYMOUS", action: "root.login.blocked_locked", success: false, request });
     return { status: "locked", message: LOCKED_MESSAGE };
   }
 
-  // Reserve the attempt BEFORE the slow bcrypt check, so concurrent requests
-  // can never squeeze in more than MAX_ROOT_ATTEMPTS guesses.
-  const inFlight = g.__ncRootInFlight ?? 0;
-  if (before.failures + inFlight >= MAX_ROOT_ATTEMPTS) {
-    return { status: "busy", message: "Another login attempt is in progress. Try again in a moment." };
+  // Count the attempt atomically BEFORE the slow bcrypt check, so concurrent
+  // requests (even on different instances) can never get more than
+  // MAX_ROOT_ATTEMPTS guesses. A successful login clears the counter.
+  const { value: attemptNo } = await kv.incr(K_FAILURES, ROOT_KEY_TTL_SECONDS);
+  if (attemptNo > MAX_ROOT_ATTEMPTS) {
+    await lock();
+    return { status: "locked", message: LOCKED_MESSAGE };
   }
-  g.__ncRootInFlight = inFlight + 1;
 
-  try {
-    // Evaluate ALL factors every time (no short-circuit) so timing reveals nothing.
-    const emailOk = safeEqual(input.email.trim().toLowerCase(), env.SUPER_ADMIN_EMAIL);
-    const passwordOk = await bcrypt.compare(input.password, env.SUPER_ADMIN_PASSWORD_HASH);
-    const step = verifyTotp(env.SUPER_ADMIN_TOTP_SECRET, input.totp);
-    const lastStep = g.__ncRootLastTotpStep ?? -1;
-    const totpOk = step !== null && step > lastStep;
+  // Evaluate ALL factors every time (no short-circuit) so timing reveals nothing.
+  const emailOk = safeEqual(input.email.trim().toLowerCase(), env.SUPER_ADMIN_EMAIL);
+  const passwordOk = await bcrypt.compare(input.password, env.SUPER_ADMIN_PASSWORD_HASH);
+  const step = verifyTotp(env.SUPER_ADMIN_TOTP_SECRET, input.totp);
+  const lastStep = Number((await kv.get(K_LAST_TOTP_STEP)) ?? -1);
+  let totpOk = step !== null && step > lastStep;
 
-    if (emailOk && passwordOk && totpOk) {
-      g.__ncRootLastTotpStep = step;
-      store.write({ ...EMPTY });
-      void audit({ actorType: "SUPER_ADMIN", actorId: env.SUPER_ADMIN_EMAIL, action: "root.login.success", request });
-      const session: AdminSession = {
-        role: "super_admin",
-        email: env.SUPER_ADMIN_EMAIL,
-        fp: credentialFingerprint(),
-        iat: Date.now(),
-      };
-      return { status: "ok", setCookie: adminCookie.commit(session) };
-    }
+  if (emailOk && passwordOk && totpOk && step !== null) {
+    // Consume this time-step exactly once across all instances (replay guard).
+    totpOk = await kv.set(totpStepKey(step), "1", { nx: true, ttlSeconds: 300 });
+  }
 
-    const current = store.read();
-    const failures = current.failures + 1;
-    const locked = failures >= MAX_ROOT_ATTEMPTS;
-    store.write({ failures, locked, lockedAt: locked ? new Date().toISOString() : null });
-    const remaining = Math.max(0, MAX_ROOT_ATTEMPTS - failures);
-
-    void audit({
-      actorType: "ANONYMOUS",
-      action: locked ? "root.login.locked" : "root.login.failed",
-      success: false,
-      request,
-      metadata: { attempt: failures, remaining },
-    });
-
-    if (locked) {
-      console.error(`[root-access] 🔒 LOCKED after ${failures} failed attempts at ${new Date().toISOString()}`);
-      return { status: "locked", message: LOCKED_MESSAGE };
-    }
-    return {
-      status: "invalid",
-      remaining,
-      message: `Invalid credentials. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.`,
+  if (emailOk && passwordOk && totpOk && step !== null) {
+    await Promise.all([
+      kv.set(K_LAST_TOTP_STEP, String(step), { ttlSeconds: ROOT_KEY_TTL_SECONDS }),
+      kv.del(K_FAILURES),
+    ]);
+    void audit({ actorType: "SUPER_ADMIN", actorId: env.SUPER_ADMIN_EMAIL, action: "root.login.success", request });
+    const session: AdminSession = {
+      role: "super_admin",
+      email: env.SUPER_ADMIN_EMAIL,
+      fp: credentialFingerprint(),
+      iat: Date.now(),
     };
-  } finally {
-    g.__ncRootInFlight = Math.max(0, (g.__ncRootInFlight ?? 1) - 1);
+    return { status: "ok", setCookie: adminCookie.commit(session) };
   }
+
+  const locked = attemptNo >= MAX_ROOT_ATTEMPTS;
+  if (locked) await lock();
+  const remaining = Math.max(0, MAX_ROOT_ATTEMPTS - attemptNo);
+
+  void audit({
+    actorType: "ANONYMOUS",
+    action: locked ? "root.login.locked" : "root.login.failed",
+    success: false,
+    request,
+    metadata: { attempt: attemptNo, remaining },
+  });
+
+  if (locked) {
+    console.error(`[root-access] 🔒 LOCKED after ${attemptNo} failed attempts at ${new Date().toISOString()}`);
+    return { status: "locked", message: LOCKED_MESSAGE };
+  }
+  return {
+    status: "invalid",
+    remaining,
+    message: `Invalid credentials. ${remaining} attempt${remaining === 1 ? "" : "s"} remaining.`,
+  };
 }

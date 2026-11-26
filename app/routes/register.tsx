@@ -26,7 +26,7 @@ export async function action({ request }: ActionFunctionArgs) {
   if (!parsed.success) {
     return json<UserAuthActionData>({ ok: false, error: "Check the highlighted fields.", fieldErrors: fieldErrors(parsed.error) }, { status: 400 });
   }
-  const limit = rateLimit(`register:ip:${getClientIp(request) ?? "unknown"}`, 10, 60 * 60);
+  const limit = await rateLimit(`register:ip:${getClientIp(request) ?? "unknown"}`, 10, 60 * 60);
   if (!limit.ok) return json<UserAuthActionData>({ ok: false, error: "Too many sign-ups from this network. Try later." }, { status: 429 });
 
   const result = await registerWithPassword(parsed.data);

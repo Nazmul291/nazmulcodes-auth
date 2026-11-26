@@ -1,9 +1,19 @@
 import { json } from "@remix-run/node";
 import { appOrigin } from "./env.server";
 
+/**
+ * Client IP for rate limits and audit logs.
+ * On Vercel, its edge network sets these headers itself and overwrites any value
+ * the client sends, so they can be trusted. Elsewhere, run behind a proxy that
+ * sets X-Forwarded-For, or clients could choose their own "IP".
+ */
 export function getClientIp(request: Request): string | null {
-  const fwd = request.headers.get("x-forwarded-for");
-  if (fwd) return fwd.split(",")[0]?.trim() || null;
+  const first = (v: string | null) => v?.split(",")[0]?.trim() || null;
+  if (process.env.VERCEL) {
+    return first(request.headers.get("x-vercel-forwarded-for")) ?? first(request.headers.get("x-real-ip"));
+  }
+  const fwd = first(request.headers.get("x-forwarded-for"));
+  if (fwd) return fwd;
   return request.headers.get("x-real-ip") ?? request.headers.get("cf-connecting-ip");
 }
 

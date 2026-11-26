@@ -13,7 +13,13 @@ export const meta: MetaFunction = () => [{ title: "Root access · NazmulCodes" }
 /** Never touches PostgreSQL: works even when the database is wiped or down. */
 export async function loader({ request }: LoaderFunctionArgs) {
   if (getSuperAdmin(request)) throw redirect("/admin/apps");
-  const status = getLockoutStatus();
+  let status;
+  try {
+    status = await getLockoutStatus();
+  } catch (err) {
+    console.error("[root-access] lockout store unavailable:", err);
+    throw json({ message: "Root access is temporarily unavailable. Please try again shortly." }, { status: 503 });
+  }
   return json(
     { locked: status.locked, remaining: status.remaining, max: MAX_ROOT_ATTEMPTS },
     { status: status.locked ? 423 : 200 },
@@ -32,8 +38,8 @@ export async function action({ request }: ActionFunctionArgs) {
       return redirectDocument("/admin/apps", { headers: { "Set-Cookie": result.setCookie } });
     case "locked":
       return json<RootLoginActionData>({ ok: false, error: result.message, locked: true, remaining: 0 }, { status: 423 });
-    case "busy":
-      return json<RootLoginActionData>({ ok: false, error: result.message }, { status: 429 });
+    case "unavailable":
+      return json<RootLoginActionData>({ ok: false, error: result.message }, { status: 503 });
     case "invalid":
       return json<RootLoginActionData>({ ok: false, error: result.message, remaining: result.remaining }, { status: 401 });
   }
