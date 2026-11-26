@@ -13,6 +13,15 @@ npm run db:push        # or: npm run db:migrate
 npm run dev            # http://localhost:5173
 ```
 
+To set up or change only the root admin login (email, password, authenticator), run:
+
+```bash
+npm run setup:admin               # hidden password prompt, terminal QR code, verifies your authenticator
+npm run setup:admin -- --generate # random password, shown once
+```
+
+It writes nothing to disk. It prints values for `.env` and raw values for your hosting dashboard in production.
+
 Google Cloud console → OAuth client → authorized redirect URI: `${APP_BASE_URL}/auth/google/callback`.
 
 Keep `SUPER_ADMIN_PASSWORD_HASH` in **single quotes** in `.env`. Vite's dotenv expansion corrupts `$2b$…` values. The env loader detects this and re-reads the raw `.env` file, but platform env vars (Docker/Fly/Vercel) must be set verbatim.
