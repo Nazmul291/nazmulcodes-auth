@@ -7,11 +7,18 @@ const BCRYPT_RE = /^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/;
 
 const EnvSchema = z.object({
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+  // Direct connection: used by migrations, and by the app when there is no pooled URL.
   // postgres:// or postgresql://, or Prisma Postgres / Accelerate (prisma+postgres://, prisma://).
   DATABASE_URL: z
     .string()
     .url()
     .regex(/^(postgres(ql)?|prisma(\+postgres)?):\/\//, "DATABASE_URL must be a PostgreSQL or Prisma Postgres URL"),
+  // Optional pooled connection for the running app (added by Vercel's Prisma Postgres integration).
+  DATABASE_URL_POOLED: z
+    .string()
+    .url()
+    .regex(/^postgres(ql)?:\/\//, "DATABASE_URL_POOLED must be a postgres:// URL")
+    .optional(),
   MASTER_ENCRYPTION_KEY: z
     .string()
     .regex(/^[0-9a-fA-F]{64}$/, "MASTER_ENCRYPTION_KEY must be 32 bytes encoded as 64 hex chars")
@@ -69,6 +76,7 @@ function withAliases(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const pick = (...keys: string[]) => keys.map((k) => source[k]).find((v) => v && v.trim() !== "");
   return {
     ...source,
+    DATABASE_URL_POOLED: pick("DATABASE_URL_POOLED"),
     UPSTASH_REDIS_REST_URL: pick("UPSTASH_REDIS_REST_URL", "KV_REST_API_URL"),
     UPSTASH_REDIS_REST_TOKEN: pick("UPSTASH_REDIS_REST_TOKEN", "KV_REST_API_TOKEN"),
   };

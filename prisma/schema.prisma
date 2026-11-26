@@ -7,12 +7,10 @@ generator client {
 }
 
 datasource db {
-  provider  = "postgresql"
-  // Runtime connection. On Vercel use your provider's POOLED URL (pgbouncer).
-  url       = env("DATABASE_URL")
-  // Direct (non-pooled) connection, used only by migrations.
-  // Locally it can be the same as DATABASE_URL.
-  directUrl = env("DIRECT_URL")
+  provider = "postgresql"
+  // Direct connection, used by migrations (`prisma migrate deploy`).
+  // At runtime the app prefers DATABASE_URL_POOLED when set (see app/lib/db.server.ts).
+  url      = env("DATABASE_URL")
 }
 
 enum UserStatus {
