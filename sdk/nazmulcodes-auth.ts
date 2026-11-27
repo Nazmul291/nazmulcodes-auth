@@ -38,8 +38,8 @@ export interface NazmulCodesAuthConfig {
   /** Must exactly match a callback URL registered for this app. */
   redirectUri: string;
   /**
-   * client_id (your app slug). Optional: if omitted it is resolved once from
-   * the API key via the token endpoint's discovery response, so you only need
+   * client_id (your app slug). Optional: if omitted, call `resolveClientId()`
+   * once (it asks POST /api/v1/client-info using the API key), so you only need
    * to configure the API key. Passing it explicitly avoids that lookup.
    */
   clientId?: string;
