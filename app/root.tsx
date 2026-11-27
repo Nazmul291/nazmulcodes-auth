@@ -12,9 +12,12 @@ import {
 import type { ReactNode } from "react";
 import { Toaster } from "~/components/ui";
 import { useToasts } from "~/hooks/useToasts";
+// Roboto Medium, self-hosted: Google's branding rules require it for the "Continue with Google" button.
+import robotoMedium from "@fontsource/roboto/latin-500.css?url";
 import stylesheet from "~/tailwind.css?url";
 
 export const links: LinksFunction = () => [
+  { rel: "stylesheet", href: robotoMedium },
   { rel: "stylesheet", href: stylesheet },
   { rel: "icon", href: "/favicon.ico", sizes: "48x48" },
   { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
