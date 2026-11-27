@@ -6,7 +6,7 @@ export const LEGAL = {
   /** Who runs the service. */
   operator: "NazmulCodes",
   /** Where people send privacy and account requests. Make sure this mailbox exists. */
-  contactEmail: "support@nazmulcodes.org",
+  contactEmail: "info@nazmulcodes.org",
   /** Bump this whenever the text of either page changes materially. */
   lastUpdated: "November 26, 2026",
   serviceUrl: "https://auth.nazmulcodes.org",
